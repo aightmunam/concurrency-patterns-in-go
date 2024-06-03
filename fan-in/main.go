@@ -72,11 +72,12 @@ func combine(ch chan string, wg *sync.WaitGroup, channels ...chan string) {
 }
 
 func main() {
-	fileNames := []string{"static/input1.csv", "static/input2.csv"}
+	fileNames := []string{"input1.csv", "input2.csv"}
 	var channels []chan string
 
 	for _, fileName := range fileNames {
-		channel, err := readFile(fileName)
+		pathPrefix := "fan-in/static/"
+		channel, err := readFile(pathPrefix + fileName)
 		if err != nil {
 			panic(fmt.Errorf("Could not read file %v. Error: %v", fileName, err))
 		}
