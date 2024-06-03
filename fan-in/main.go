@@ -8,64 +8,83 @@ import (
 	"sync"
 )
 
-func readFromFile(filePath string, ch chan string, wg *sync.WaitGroup) {
+func readFile(filePath string) (chan string, error) {
 	fd, err := os.Open(filePath)
-	defer fd.Close()
-
-	if err != nil {
-		fmt.Println("Error: ", err)
-	}
-
 	r := csv.NewReader(fd)
 
-	// ignore headers row
-	_, err = r.Read()
 	if err != nil {
-		fmt.Println("Error: ", err)
+		fmt.Println("Error")
+		return nil, err
+	}
+
+	out := make(chan string)
+	go parseCsvData(r, out)
+	return out, nil
+}
+
+func parseCsvData(r *csv.Reader, ch chan string) {
+	defer close(ch)
+
+	// ignore headers row
+	_, err := r.Read()
+	if err != nil {
+		fmt.Println("Error", err)
+		return
 	}
 
 	var totalData string
+	const (
+		title  = 1
+		author = 2
+	)
 	for {
-		const title = 1
-		const author = 2
 		record, err := r.Read()
 		if err == io.EOF {
 			break
 		}
+		if err != nil {
+			fmt.Println("Error reading record:", err)
+			continue
+		}
 		totalData += fmt.Sprintf("%v (%v)\n", record[title], record[author])
 	}
-
-	defer wg.Done()
+	fmt.Printf("Sending all data from file: \n%v\n", totalData)
 	ch <- totalData
 }
 
-func AggregateData(ch chan string, rsch chan string) {
-	var aggregatedData string
-	for data := range ch {
-		aggregatedData += data
-	}
+func aggregateData(channels ...chan string) chan string {
+	var wg sync.WaitGroup
+	rsch := make(chan string)
 
-	rsch <- aggregatedData
+	go combine(rsch, &wg, channels...)
+	return rsch
+}
+
+func combine(ch chan string, wg *sync.WaitGroup, channels ...chan string) {
+	var aggregatedData string
+	for _, ch := range channels {
+		aggregatedData += <-ch
+	}
+	wg.Wait()
+
+	ch <- aggregatedData
+	close(ch)
 }
 
 func main() {
 	fileNames := []string{"static/input1.csv", "static/input2.csv"}
-	dataChannel := make(chan string, len(fileNames))
+	var channels []chan string
 
-	var wg sync.WaitGroup
 	for _, fileName := range fileNames {
-		wg.Add(1)
-		go readFromFile(fileName, dataChannel, &wg)
+		channel, err := readFile(fileName)
+		if err != nil {
+			panic(fmt.Errorf("Could not read file %v. Error: %v", fileName, err))
+		}
+		channels = append(channels, channel)
 	}
 
-	wg.Wait()
-	close(dataChannel) // Close the channel after all subtasks are done
-
-	rsch := make(chan string, 1)
-	go AggregateData(dataChannel, rsch)
-	aggregatedData := <-rsch
-	close(rsch)
-
-	fmt.Printf("Final Data: \n%v", aggregatedData)
-
+	result := aggregateData(channels...)
+	for data := range result {
+		fmt.Println(data)
+	}
 }
