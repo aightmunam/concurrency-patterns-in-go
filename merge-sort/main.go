@@ -1,6 +1,24 @@
 package main
 
-import "fmt"
+import (
+	"fmt"
+	"math/rand"
+	"sync"
+)
+
+// Naive implementation of mergeSort where we try to parallelize
+// everything without thinking is even slower than doing it
+// sequentially, because the overhead of creating a goroutine
+// for sorting very small arrays is too costly. For example:
+// sorting an array of size 1 or 2, we create a goroutine, which will
+// be much more costly than doing it sequentially.
+
+// A better approach is to define a threshold and if the array size
+// becomes smaller than that threshold, we do not use a goroutine to
+// sort it but do it sequentially.
+
+// An optimal threshold is 2048.
+const min_size_threshold = 2048
 
 func mergeSort(items []int) []int {
 	low := 0
@@ -10,8 +28,24 @@ func mergeSort(items []int) []int {
 	}
 	middle := len(items) / 2
 
-	items_left := mergeSort(items[low:middle])
-	items_right := mergeSort(items[middle:high])
+	var items_left, items_right []int
+	if high < min_size_threshold {
+		items_left = mergeSort(items[low:middle])
+		items_right = mergeSort(items[middle:high])
+	} else {
+		var wg sync.WaitGroup
+		wg.Add(2)
+		go func() {
+			defer wg.Done()
+			items_left = mergeSort(items[low:middle])
+		}()
+
+		go func() {
+			defer wg.Done()
+			items_right = mergeSort(items[middle:high])
+		}()
+		wg.Wait()
+	}
 
 	return merge(items_left, items_right)
 }
@@ -46,12 +80,13 @@ func merge(items_left, items_right []int) []int {
 }
 
 func main() {
-	unsorted := []int{2, 1, -4, 5, -12, 9, 6, 0, 2, 12, 4, -3}
+	const array_size = 15000
+	unsorted := make([]int, array_size)
+
+	for i := 0; i < array_size; i++ {
+		unsorted[i] = rand.Intn(array_size)
+	}
 	sorted := mergeSort(unsorted)
 	fmt.Println(unsorted)
 	fmt.Println(sorted)
-
-	// fmt.Println(
-	// 	merge([]int{-12, -4, 1, 2, 5, 9}, []int{-3, 0, 2, 4, 6, 12}),
-	// )
 }
