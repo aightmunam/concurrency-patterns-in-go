@@ -86,3 +86,129 @@ In the above example, *no error is shown*. The main function simply reads one me
 
 ---
 
+### Some quotes directly from [The Go Memory Model](https://go.dev/ref/mem)
+
+#### Initialization
+
+>If a package p imports package q, the completion of q's init functions happens before the start of any of p's.
+
+Go waits for the completion of all init functions for all the imported packages before the main function is called.
+
+#### Goroutine
+
+>The go statement that starts a new goroutine is synchronized before the start of the goroutine's execution. However, the exit of a goroutine is not guaranteed to be synchronized before any event in the program.
+
+Creating a goroutine happens before the goroutine’s execution begins. There is no such guarantee incase of exit of a goroutine.
+
+Take the following example:
+```go
+i := 0
+go func() {
+    i++
+}()
+fmt.Println(i)
+```
+No race condition between `i := 0` and `i++` since the goroutine needs to be created before it is executed. And it is created after `i` is initialized.
+
+Race condition between `i++` and `fmt.Println(i)` because we have no way knowing which of the two statements will be called first. 
+
+#### Channels
+
+> A send on a channel is synchronized before the completion of the corresponding receive from that channel.
+
+A send on a channel happens before the receive on the channel.
+```go
+i := 0
+ch := make(chan int)
+go func() {
+    <-ch
+    fmt.Println(i)
+}()
+
+i++
+ch <- 0
+```
+The order is as follows:
+*variable increment < channel send < channel receive < variable read*
+
+
+<br>
+
+
+>The closing of a channel is synchronized before a receive that returns a zero value because the channel is closed.
+
+```go
+var c = make(chan int, 10)
+var a string
+
+func f() {
+	a = "hello, world"
+	c <- 0
+
+    // closing a channel sends the zero value to the channel
+    // In this case, close(c) will send 0 (zero value for int) to the channel
+    // c <- 0 is equivalent to close(c) in this case
+}
+
+
+func main() {
+	go f()
+	<-c  // synchronizes, so guarantees that hello, world will be printed
+
+	print(a)
+}
+```
+
+In the previous example, replacing `c <- 0` with `close(c)` yields a program with the same guaranteed behavior.
+
+<br>
+
+>A receive from an unbuffered channel is synchronized before the completion of the corresponding send on that channel.
+
+A receive from an unbuffered channel happens before the send on that channel completes.
+
+```go
+var c = make(chan int)
+var a string
+
+func f() {
+	a = "hello, world"
+	<-c // will wait till the channel receives some message
+}
+
+func main() {
+	go f()
+	c <- 0
+	print(a)  // guaranteed to print "hello, world" because the receive of a channel makes it wait till it receives some message
+}
+```
+
+<br>
+
+> The kth receive on a channel with capacity C is synchronized before the completion of the k+Cth send from that channel completes.
+
+A channel with buffer size C, will receive its kth message before the C+kth message send completes.
+
+- A counting semaphore can be modeled by a buffered channel.
+  - the number of items in the channel corresponds to the number of active uses.
+  - the capacity of the channel corresponds to the maximum number of simultaneous uses.
+  - sending an item acquires the semaphore.
+  - receiving an item releases the semaphore.
+- A counting semaphore can be used to limit concurrency.
+
+```go
+var limit = make(chan int, 3) // buffered channel can be used to block after the buffer is full
+
+func main() {
+	for _, w := range work {
+		go func(w func()) {
+			limit <- 1 // each goroutine fills the buffer by 1. This blocks after 3 messages have been sent. 
+			w()
+			<-limit  // Each time we receive the message, the buffer gets a single capacity back
+		}(w)
+	}
+	select{}
+}
+```
+
+---
